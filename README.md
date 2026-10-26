@@ -41,7 +41,8 @@ flowchart TB
 | Kali | Attack platform | Kali Linux |
 | Wazuh | SIEM: log collection, detection, dashboards | Ubuntu Server |
 
-> Screenshot to add here: the Proxmox VM list showing all the lab VMs.
+<img width="1506" height="859" alt="01-proxmox-vms" src="https://github.com/user-attachments/assets/4f1a9640-beed-4dd3-8c5e-9fc1172a20c4" />
+
 
 **Why it is built this way:** the domain is deliberately placed behind pfSense on a bridge with no uplink, so I can run live attacks and malware-adjacent tooling without any risk to my home network. The firewall also gives me a single controlled point for later network-monitoring work.
 
@@ -59,7 +60,8 @@ Scanned the lab subnet from Kali to find live hosts and identify the Domain Cont
 nmap -sC -sV -p- <DC-host>
 ```
 
-> Screenshot to add: the nmap output showing DC ports.
+<img width="1274" height="995" alt="02-nmap-recon" src="https://github.com/user-attachments/assets/8f41aa9a-60ef-4d4f-b168-b325df8e0852" />
+
 
 ### 2. Enumeration
 
@@ -75,7 +77,7 @@ kerbrute userenum -d lab.internal --dc <DC-host> users.txt
 Sprayed a weak candidate password across the enumerated users to find a valid low-privilege account (the service account `svc-sql`), without locking accounts out.
 
 ```bash
-netexec smb <DC-host> -u users.txt -p 'Season2026' --continue-on-success
+netexec smb <DC-host> -u users.txt -p '<password>' --continue-on-success
 ```
 
 ### 4. Kerberoasting
@@ -83,8 +85,12 @@ netexec smb <DC-host> -u users.txt -p 'Season2026' --continue-on-success
 With one valid domain credential, requested Kerberos service tickets (TGS) for accounts that have a Service Principal Name, which returns a ticket encrypted with the service account's password hash.
 
 ```bash
-netexec ldap <DC-host> -u svc-sql -p 'Season2026' --kerberoasting kerb_hashes.txt
+netexec ldap <DC-host> -u svc-sql -p '<password>' --kerberoasting kerb_hashes.txt
 ```
+
+<img width="1148" height="320" alt="03-kerberoasting-getuserspns" src="https://github.com/user-attachments/assets/96b2190c-f3f6-432b-8fc0-62d75a12f2bd" />
+
+
 
 **Depth note:** Windows Server 2025 disables RC4 by default, so the tickets came back as AES, not the older RC4 format most tutorials assume. That changed which Hashcat mode I needed and is a good example of modern defaults breaking an old playbook.
 
@@ -96,7 +102,9 @@ Cracked the AES Kerberos hash offline with Hashcat (mode 19700 for AES-256 TGS-R
 hashcat -m 19700 kerb_hashes.txt rockyou.txt
 ```
 
-> Screenshot to add: Hashcat showing the recovered password (redact the password itself).
+<img width="1271" height="865" alt="04-hashcat-crack" src="https://github.com/user-attachments/assets/a663e40b-4dd0-4ca4-8f94-c3506a5bb1cc" />
+
+
 
 ### 6. Mapping the attack path with BloodHound
 
@@ -107,7 +115,8 @@ Collected the domain's users, groups, sessions, and ACLs with SharpHound, then l
 SharpHound.exe -c All -d lab.internal --ldapusername svc-sql --ldappassword 'REDACTED' --domaincontroller dc01.lab.internal
 ```
 
-> Screenshot to add: the BloodHound graph showing the svc-sql to Domain Admins path.
+<img width="1265" height="814" alt="05-bloodhound-path" src="https://github.com/user-attachments/assets/beee9a65-9d49-4722-adec-8e6f264963c8" />
+
 
 **Depth note:** the Linux-based collectors failed against the DC because Server 2025 enforces LDAP signing and channel binding by default. Running SharpHound from a domain-joined Windows host was the realistic way around it, which itself is a useful lesson about how modern AD hardening pushes attackers toward on-host collection.
 
@@ -143,13 +152,17 @@ msiexec.exe /i wazuh-agent.msi /q WAZUH_MANAGER='<wazuh-host>'
 NET START Wazuh
 ```
 
-> Screenshot to add: the Wazuh Endpoints page showing DC01 as Active.
+<img width="1273" height="1364" alt="06-wazuh-agent-active" src="https://github.com/user-attachments/assets/0020f320-396c-47db-abde-d4fdddf96018" />
+
 
 ### The detection
 
 Replaying the Domain Admins change generated Windows Security **event 4728** ("a member was added to a security-enabled global group"). The agent shipped it to Wazuh, which matched it to rule **60159** and raised a **Level 12** (high severity) alert.
+<img width="1271" height="1358" alt="07-wazuh-detection-dashboard" src="https://github.com/user-attachments/assets/b0b1ae93-725b-4a17-a57f-b8df6d8e3b0a" />
 
-> Screenshot to add: the Wazuh alert document for event 4728.
+
+<img width="1271" height="1359" alt="08-wazuh-alert-4728" src="https://github.com/user-attachments/assets/e76357a3-b353-4054-87d7-f716078586a8" />
+
 
 Key fields from the alert, which together prove the detection:
 
